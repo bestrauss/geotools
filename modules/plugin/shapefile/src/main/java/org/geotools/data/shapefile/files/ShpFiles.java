@@ -51,6 +51,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.commons.lang3.SystemUtils;
+import java.util.zip.GZIPInputStream;
 import org.geotools.util.URLs;
 import org.geotools.util.logging.Logging;
 
@@ -206,7 +207,8 @@ public class ShpFiles {
             // doesn't exist
             return null;
         }
-        File[] files = directory.listFiles((dir, name) -> file.getName().equalsIgnoreCase(name));
+        File[] files = directory.listFiles((dir, name) -> file.getName().equalsIgnoreCase(name) 
+                                             || (file.getName() + ".gz").equalsIgnoreCase(name));
         if (files != null && files.length > 0) {
             try {
                 return files[0].toURI().toURL();
@@ -425,8 +427,23 @@ public class ShpFiles {
                                                         + requestor
                                                         + " to have locked the url but it does not hold the lock for the URL"));
 
+if (false)
+{
         threadLockers.remove(requestedLocker);
         if (threadLockers.isEmpty()) lockers.remove(Thread.currentThread());
+}
+else
+{
+        boolean removed = threadLockers.remove(new ShpFilesLocker(url, requestor));
+        if (!removed) {
+            // [BS] produces error in NavStreetsShpTest
+            throw new IllegalArgumentException(
+                    "Expected requestor "
+                            + requestor
+                            + " to have locked the url but it does not hold the lock for the URL");
+        }
+        if (threadLockers.size() == 0) lockers.remove(Thread.currentThread());
+}
         readWriteLock.readLock().unlock();
     }
 
@@ -764,9 +781,10 @@ public class ShpFiles {
     public ReadableByteChannel getReadChannel(ShpFileType type, FileReader requestor)
             throws IOException {
         URL url = acquireRead(type, requestor);
+        final boolean isGz = url.getPath().toLowerCase().endsWith(".gz"); // [BS]
         ReadableByteChannel channel = null;
         try {
-            if (isLocal()) {
+            if (isLocal() && !isGz) { // [BS]
                 File file = URLs.urlToFile(url);
 
                 @SuppressWarnings("resource")
@@ -774,6 +792,10 @@ public class ShpFiles {
                 channel = new FileChannelDecorator(raf.getChannel(), this, url, requestor);
             } else {
                 InputStream in = url.openConnection().getInputStream();
+                if (isGz) // [BS]
+                {
+                    in = new GZIPInputStream(in);
+                }
                 channel =
                         new ReadableByteChannelDecorator(
                                 Channels.newChannel(in), this, url, requestor);

@@ -34,6 +34,7 @@ import org.geotools.data.util.ScreenMap;
 import org.geotools.feature.simple.SimpleFeatureBuilder;
 import org.geotools.geometry.jts.LiteCoordinateSequence;
 import org.geotools.util.logging.Logging;
+import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.GeometryFactory;
@@ -163,10 +164,10 @@ class ShapefileFeatureReader implements FeatureReader<SimpleFeatureType, SimpleF
             return shp.hasNext();
         } else {
             boolean dbfHasNext = dbf.hasNext();
-            boolean shpHasNext = shp.hasNext();
+            boolean shpHasNext = shp == null || shp.hasNext(); // [BS]
             if (dbfHasNext && shpHasNext) {
                 return true;
-            } else if (dbfHasNext || shpHasNext) {
+            } else if (shp != null && (dbfHasNext || shpHasNext)) { // [BS]
                 throw new IOException(((shpHasNext) ? "Shp" : "Dbf") + " has extra record");
             } else {
                 return false;
@@ -177,9 +178,12 @@ class ShapefileFeatureReader implements FeatureReader<SimpleFeatureType, SimpleF
     @Override
     public boolean hasNext() throws IOException {
         while (nextFeature == null && filesHaveMore()) {
-            Record record = shp.nextRecord();
+            Record record = shp != null ? shp.nextRecord() : null; // [BS]
 
-            Geometry geometry = getGeometry(record);
+            Geometry geometry =
+                    record != null
+                            ? getGeometry(record)
+                            : SKIP.getFactory().createPoint(new Coordinate()); // [BS]
             if (geometry != SKIP) {
                 // also grab the dbf row
                 Row row;
@@ -192,7 +196,10 @@ class ShapefileFeatureReader implements FeatureReader<SimpleFeatureType, SimpleF
                     row = null;
                 }
 
-                nextFeature = buildFeature(record.number, geometry, row, record.envelope());
+                final int number = record != null ? record.number : 0; // [BS]
+                final Envelope envelope =
+                        record != null ? record.envelope() : geometry.getEnvelopeInternal(); // [BS]
+                nextFeature = buildFeature(number, geometry, row, envelope); // [BS]
             } else {
                 if (dbf != null) {
                     dbf.skip();

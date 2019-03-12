@@ -18,6 +18,7 @@ package org.geotools.data.shapefile;
 
 import static org.geotools.data.shapefile.files.ShpFileType.SHP;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
@@ -60,13 +61,12 @@ import org.geotools.feature.type.BasicFeatureTypes;
 import org.geotools.filter.FilterAttributeExtractor;
 import org.geotools.filter.visitor.ExtractBoundsFilterVisitor;
 import org.geotools.geometry.jts.ReferencedEnvelope;
-import org.geotools.util.Classes;
+import org.geotools.referencing.CRS;
 import org.geotools.util.factory.Hints;
 import org.geotools.util.factory.Hints.Key;
 import org.geotools.util.logging.Logging;
 import org.locationtech.jts.geom.CoordinateSequenceFactory;
 import org.locationtech.jts.geom.Envelope;
-import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.LineString;
 import org.locationtech.jts.geom.MultiLineString;
@@ -191,10 +191,13 @@ class ShapefileFeatureSource extends ContentFeatureSource {
 
     ShpFiles shpFiles;
 
+    private GeometryFactory geometryFactory; // [BS]
+
     public ShapefileFeatureSource(ContentEntry entry, ShpFiles shpFiles) {
         super(entry, Query.ALL);
         this.shpFiles = shpFiles;
-        HashSet<Key> hints = new HashSet<>();
+        this.geometryFactory = entry.getDataStore().getGeometryFactory(); // [BS]
+        HashSet<Key> hints = new HashSet<Hints.Key>();
         hints.add(Hints.FEATURE_DETACHED);
         hints.add(Hints.JTS_GEOMETRY_FACTORY);
         hints.add(Hints.JTS_COORDINATE_SEQUENCE_FACTORY);
@@ -345,8 +348,12 @@ class ShapefileFeatureSource extends ContentFeatureSource {
         // setup the feature readers
         ShapefileSetManager shpManager = getDataStore().shpManager;
         @SuppressWarnings("PMD.CloseResource") // managed as a field of the return value
-        ShapefileReader shapeReader = shpManager.openShapeReader(geometryFactory, goodRecs != null);
-        @SuppressWarnings("PMD.CloseResource") // managed as a field of the return value
+        ShapefileReader shapeReader = null;
+        try {
+            shapeReader = shpManager.openShapeReader(geometryFactory, goodRecs != null);
+        } catch (final FileNotFoundException e) {
+            // [BS]
+        }
         DbaseFileReader dbfReader = null;
         List<AttributeDescriptor> attributes = readSchema.getAttributeDescriptors();
         if (attributes.isEmpty()
@@ -496,7 +503,11 @@ class ShapefileFeatureSource extends ContentFeatureSource {
         AttributeTypeBuilder build = new AttributeTypeBuilder();
         List<AttributeDescriptor> attributes = new ArrayList<>();
         try {
-            shp = shpManager.openShapeReader(new GeometryFactory(), false);
+            try {
+                shp = shpManager.openShapeReader(new GeometryFactory(), false);
+            } catch (final FileNotFoundException e) {
+                // [BS]
+            }
             dbf = shpManager.openDbfReader(false);
             try {
                 prj = shpManager.openPrjReader();
@@ -511,11 +522,22 @@ class ShapefileFeatureSource extends ContentFeatureSource {
                             "Ignoring invalid prj file and moving on: " + fe.getMessage());
                 }
                 crs = null;
+                if (geometryFactory != null && geometryFactory.getSRID() != 0) // [BS]
+                {
+                    final String srid = String.format("EPSG:%d", geometryFactory.getSRID());
+                    try {
+                        crs = CRS.decode(srid);
+                    } catch (final Exception e) {
+                    }
+                }
             }
 
-            Class<? extends Geometry> geometryClass =
-                    JTSUtilities.findBestGeometryClass(shp.getHeader().getShapeType());
-            build.setName(Classes.getShortName(geometryClass));
+            Class<?> geometryClass =
+                    shp != null // [BS]
+                            ? JTSUtilities.findBestGeometryClass(shp.getHeader().getShapeType())
+                            : Point.class;
+            // build.setName(Classes.getShortName(geometryClass)); // [BS]
+            build.setName("the_geom"); // [BS]
             build.setNillable(true);
             build.setCRS(crs);
             build.setBinding(geometryClass);
