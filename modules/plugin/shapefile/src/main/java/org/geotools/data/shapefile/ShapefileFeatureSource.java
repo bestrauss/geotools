@@ -18,6 +18,7 @@ package org.geotools.data.shapefile;
 
 import static org.geotools.data.shapefile.files.ShpFileType.SHP;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
@@ -59,7 +60,7 @@ import org.geotools.feature.type.BasicFeatureTypes;
 import org.geotools.filter.FilterAttributeExtractor;
 import org.geotools.filter.visitor.ExtractBoundsFilterVisitor;
 import org.geotools.geometry.jts.ReferencedEnvelope;
-import org.geotools.util.Classes;
+import org.geotools.referencing.CRS;
 import org.geotools.util.factory.Hints;
 import org.geotools.util.factory.Hints.Key;
 import org.geotools.util.logging.Logging;
@@ -188,9 +189,12 @@ class ShapefileFeatureSource extends ContentFeatureSource {
 
     ShpFiles shpFiles;
 
+    private GeometryFactory geometryFactory; // [BS]
+
     public ShapefileFeatureSource(ContentEntry entry, ShpFiles shpFiles) {
         super(entry, Query.ALL);
         this.shpFiles = shpFiles;
+        this.geometryFactory = entry.getDataStore().getGeometryFactory(); // [BS]
         HashSet<Key> hints = new HashSet<Hints.Key>();
         hints.add(Hints.FEATURE_DETACHED);
         hints.add(Hints.JTS_GEOMETRY_FACTORY);
@@ -366,7 +370,12 @@ class ShapefileFeatureSource extends ContentFeatureSource {
 
         // setup the feature readers
         ShapefileSetManager shpManager = getDataStore().shpManager;
-        ShapefileReader shapeReader = shpManager.openShapeReader(geometryFactory, goodRecs != null);
+        ShapefileReader shapeReader = null;
+        try {
+            shapeReader = shpManager.openShapeReader(geometryFactory, goodRecs != null);
+        } catch (final FileNotFoundException e) {
+            // [BS]
+        }
         DbaseFileReader dbfReader = null;
         List<AttributeDescriptor> attributes = readSchema.getAttributeDescriptors();
         if (attributes.size() < 1
@@ -517,7 +526,11 @@ class ShapefileFeatureSource extends ContentFeatureSource {
         AttributeTypeBuilder build = new AttributeTypeBuilder();
         List<AttributeDescriptor> attributes = new ArrayList<AttributeDescriptor>();
         try {
-            shp = shpManager.openShapeReader(new GeometryFactory(), false);
+            try {
+                shp = shpManager.openShapeReader(new GeometryFactory(), false);
+            } catch (final FileNotFoundException e) {
+                // [BS]
+            }
             dbf = shpManager.openDbfReader(false);
             try {
                 prj = shpManager.openPrjReader();
@@ -527,11 +540,22 @@ class ShapefileFeatureSource extends ContentFeatureSource {
                 }
             } catch (FactoryException fe) {
                 crs = null;
+                if (geometryFactory != null && geometryFactory.getSRID() != 0) // [BS]
+                {
+                    final String srid = String.format("EPSG:%d", geometryFactory.getSRID());
+                    try {
+                        crs = CRS.decode(srid);
+                    } catch (final Exception e) {
+                    }
+                }
             }
 
             Class<?> geometryClass =
-                    JTSUtilities.findBestGeometryClass(shp.getHeader().getShapeType());
-            build.setName(Classes.getShortName(geometryClass));
+                    shp != null // [BS]
+                            ? JTSUtilities.findBestGeometryClass(shp.getHeader().getShapeType())
+                            : Point.class;
+            // build.setName(Classes.getShortName(geometryClass)); // [BS]
+            build.setName("the_geom"); // [BS]
             build.setNillable(true);
             build.setCRS(crs);
             build.setBinding(geometryClass);

@@ -75,12 +75,19 @@ public enum ShpFileType {
      * c:\shapefiles\file1 but all other will return null.
      */
     public String toBase(String path) {
+
         if (!path.toLowerCase().endsWith(extensionWithPeriod)
                 || path.equalsIgnoreCase(extensionWithPeriod)) {
-            return null;
+            if (!path.toLowerCase().endsWith(extensionWithPeriod + ".gz") // [BS]
+                    || path.equalsIgnoreCase(extensionWithPeriod + ".gz")) {
+                return null;
+            }
+            final int indexOfExtension =
+                    path.toLowerCase().lastIndexOf(extensionWithPeriod + ".gz"); // [BS]
+            return path.substring(0, indexOfExtension);
         }
 
-        int indexOfExtension = path.toLowerCase().lastIndexOf(extensionWithPeriod);
+        final int indexOfExtension = path.toLowerCase().lastIndexOf(extensionWithPeriod);
         return path.substring(0, indexOfExtension);
     }
 

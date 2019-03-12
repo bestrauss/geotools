@@ -18,7 +18,9 @@ package org.geotools.data.shapefile;
 
 import java.awt.RenderingHints.Key;
 import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
+import java.io.LineNumberReader;
 import java.io.Serializable;
 import java.net.URI;
 import java.net.URL;
@@ -39,6 +41,8 @@ import org.geotools.data.shapefile.files.ShpFiles;
 import org.geotools.util.KVP;
 import org.geotools.util.URLs;
 import org.geotools.util.logging.Logging;
+import org.locationtech.jts.geom.GeometryFactory;
+import org.locationtech.jts.geom.PrecisionModel;
 
 /** Builds instances of the shapefile data store */
 public class ShapefileDataStoreFactory implements FileDataStoreFactorySpi {
@@ -212,6 +216,23 @@ public class ShapefileDataStoreFactory implements FileDataStoreFactorySpi {
             isEnableSpatialIndex = Boolean.TRUE;
         }
 
+        { // [BS]
+            final File file = URLs.urlToFile(url);
+            if (file != null) {
+                String fileName = file.getAbsolutePath();
+                final int k = fileName.lastIndexOf('.');
+                if (k >= 0) {
+                    fileName = fileName.substring(0, k) + ".cpg";
+                    try (FileReader reader = new FileReader(fileName);
+                            LineNumberReader lr = new LineNumberReader(reader)) {
+                        final String charsetName = lr.readLine().trim();
+                        dbfCharset = Charset.forName(charsetName);
+                    } catch (final Exception e) {
+                    }
+                }
+            }
+        }
+
         // are we creating a directory of shapefiles store, or a single one?
         File dir = URLs.urlToFile(url);
         if (dir != null && dir.isDirectory()) {
@@ -227,6 +248,20 @@ public class ShapefileDataStoreFactory implements FileDataStoreFactorySpi {
 
             // build the store
             ShapefileDataStore store = new ShapefileDataStore(url);
+
+            { // [BS]
+                if (params.containsKey("srid")) {
+                    try {
+                        final Integer iSrid = (Integer) params.get("srid");
+                        final PrecisionModel precisionModel =
+                                new GeometryFactory().getPrecisionModel();
+                        store.setGeometryFactory(
+                                new GeometryFactory(precisionModel, iSrid.intValue()));
+                    } catch (final Exception e) {
+                    }
+                }
+            }
+
             if (namespace != null) {
                 store.setNamespaceURI(namespace.toString());
             }
@@ -308,8 +343,11 @@ public class ShapefileDataStoreFactory implements FileDataStoreFactorySpi {
         }
     }
 
-    public boolean canProcess(URL f) {
-        return f != null && f.getFile().toUpperCase().endsWith("SHP");
+    public boolean canProcess(URL url) {
+
+        // [BS]
+        final String file = url != null ? url.getFile().toLowerCase() : null;
+        return file != null && (file.endsWith(".shp") || file.endsWith(".shp.gz"));
     }
 
     /**
