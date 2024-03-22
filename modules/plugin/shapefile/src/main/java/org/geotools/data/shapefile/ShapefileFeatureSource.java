@@ -574,6 +574,7 @@ class ShapefileFeatureSource extends ContentFeatureSource {
                     build.setNillable(true);
                     build.setLength(length);
                     build.setBinding(attributeClass);
+                    build.setName(name); // [BS] 22/03/2024
                     attributes.add(build.buildDescriptor(name));
                 }
             }

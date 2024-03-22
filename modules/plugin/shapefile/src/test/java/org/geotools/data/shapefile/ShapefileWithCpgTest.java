@@ -230,7 +230,7 @@ public class ShapefileWithCpgTest extends TestCaseSupport {
                         source.getFeatures(Filter.INCLUDE).features()) {
                     SimpleFeature feature = features.next();
                     if (typeName.equals("rus-windows-1251")) {
-                        assertThat(feature.getAttribute("TEXT"), is(not(equalTo("Кириллица"))));
+                        assertThat(feature.getAttribute("TEXT"), is((equalTo("Кириллица"))));
                     } else {
                         assertThat(feature.getAttribute("TEKST1"), is(equalTo("Charl\u00F8tte")));
                     }
